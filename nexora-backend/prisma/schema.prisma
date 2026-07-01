@@ -1,0 +1,225 @@
+// Nexora — Prisma Schema
+// Every model here maps directly to what the frontend reads/writes.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────
+// MERCHANT (single-tenant: one record = this Nexora deployment)
+// ─────────────────────────────────────────────────────────────────
+model Merchant {
+  id               String   @id @default(uuid())
+  name             String
+  email            String
+  apiKey           String   @unique
+  webhookSecret    String
+  // Nomba parent account credentials (loaded from env at runtime,
+  // stored here only for the /api/me display — never the raw secret)
+  nombaAccountId   String
+  merchantBalance  Float    @default(0)
+  createdAt        DateTime @default(now())
+
+  settlements      Settlement[]
+  services         MerchantService[]
+}
+
+// ─────────────────────────────────────────────────────────────────
+// CUSTOMER
+// kycTier: 1 = basic (name/phone/email), 2 = BVN linked
+// ─────────────────────────────────────────────────────────────────
+model Customer {
+  id          String   @id @default(uuid())
+  firstName   String
+  lastName    String
+  email       String   @unique
+  phone       String
+  bvn         String?
+  kycTier     Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  virtualAccounts VirtualAccount[]
+  invoices        Invoice[]
+}
+
+// ─────────────────────────────────────────────────────────────────
+// VIRTUAL ACCOUNT
+// One permanent dedicated NUBAN per customer.
+// accountRef = our stable key sent to Nomba (stored as-is).
+// accountNumber = the NUBAN Nomba returns.
+// subAccountId = Nomba sub-account ID if provisioned under one.
+// ─────────────────────────────────────────────────────────────────
+model VirtualAccount {
+  id            String   @id @default(uuid())
+  accountName   String
+  accountRef    String   @unique   // sent to Nomba, our FK
+  accountNumber String?            // NUBAN from Nomba response
+  bankName      String   @default("Nombank MFB")
+  bankAccountName String?
+  status        String   @default("ACTIVE")  // ACTIVE | CLOSED | FROZEN
+  balance       Float    @default(0)
+  expectedAmount Float?             // set when linked to an invoice
+  nombaAccountHolderId String?      // Nomba's accountHolderId for reference
+  subAccountId  String?             // Nomba sub-account ID if used
+
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id])
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  transactions  Transaction[]
+  ledgerEntries LedgerEntry[]
+}
+
+// ─────────────────────────────────────────────────────────────────
+// INVOICE
+// Tracks expected amounts per customer.
+// Reconciliation engine matches inbound transactions to open invoices.
+// ─────────────────────────────────────────────────────────────────
+model Invoice {
+  id          String   @id @default(uuid())
+  reference   String   @unique
+  amount      Float
+  amountPaid  Float    @default(0)
+  status      String   @default("PENDING")  // PENDING | PARTIAL | PAID | OVERPAID
+  dueDate     DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id])
+
+  transactions Transaction[]
+}
+
+// ─────────────────────────────────────────────────────────────────
+// TRANSACTION
+// Every inbound transfer that hits a virtual account.
+// Nomba fires virtual_account.funded → we write one record per event.
+// nombaRequestId = Nomba's requestId for idempotency deduplication.
+// ─────────────────────────────────────────────────────────────────
+model Transaction {
+  id               String   @id @default(uuid())
+  reference        String   @unique   // our internal ref
+  nombaRequestId   String?  @unique   // Nomba webhook requestId — idempotency guard
+  nombaSessionId   String?            // for requery via GET /v1/transactions/requery/:sessionId
+  amount           Float
+  senderName       String?
+  senderAccount    String?
+  narration        String?
+  status           String   @default("PENDING")  // PENDING | MATCHED | PARTIAL | UNMATCHED | RECONCILED
+  reconciledAt     DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  virtualAccountId String
+  virtualAccount   VirtualAccount @relation(fields: [virtualAccountId], references: [id])
+
+  invoiceId        String?
+  invoice          Invoice?  @relation(fields: [invoiceId], references: [id])
+
+  exception        Exception?
+  ledgerEntries    LedgerEntry[]
+}
+
+// ─────────────────────────────────────────────────────────────────
+// EXCEPTION
+// Raised when a transaction cannot be auto-reconciled:
+//   - no open invoice for the customer
+//   - overpayment beyond 2% tolerance
+//   - virtual account belongs to wrong customer (misdirected)
+// ─────────────────────────────────────────────────────────────────
+model Exception {
+  id            String   @id @default(uuid())
+  type          String   // UNMATCHED | OVERPAYMENT | UNDERPAYMENT | MISDIRECTED
+  reason        String
+  amount        Float
+  senderName    String?
+  resolved      Boolean  @default(false)
+  resolvedAt    DateTime?
+  resolvedBy    String?  // manual | auto
+  createdAt     DateTime @default(now())
+
+  transactionId String   @unique
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+}
+
+// ─────────────────────────────────────────────────────────────────
+// LEDGER ENTRY
+// Running balance ledger per virtual account — powers Statements page.
+// type: CREDIT (inbound) | DEBIT (refund / manual sweep)
+// ─────────────────────────────────────────────────────────────────
+model LedgerEntry {
+  id               String   @id @default(uuid())
+  type             String   // CREDIT | DEBIT
+  amount           Float
+  balanceAfter     Float
+  description      String
+  createdAt        DateTime @default(now())
+
+  virtualAccountId String
+  virtualAccount   VirtualAccount @relation(fields: [virtualAccountId], references: [id])
+
+  transactionId    String?
+  transaction      Transaction? @relation(fields: [transactionId], references: [id])
+}
+
+// ─────────────────────────────────────────────────────────────────
+// MERCHANT SERVICE
+// Captures outgoing payments: airtime, data, transfers, utility bills.
+// status: PENDING_APPROVAL | PENDING | SUCCESS | FAILED | REJECTED
+// Transactions >= ₦500,000 go to PENDING_APPROVAL queue.
+// ─────────────────────────────────────────────────────────────────
+model MerchantService {
+  id          String   @id @default(uuid())
+  type        String   // AIRTIME | DATA | CABLE | ELECTRICITY | BETTING | BANK TRANSFER | WALLET TRANSFER
+  destination String
+  amount      Float
+  status      String   @default("PENDING")
+  reference   String   @unique
+  nombaRef    String?  // Nomba's reference returned from their API
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  merchantId  String
+  merchant    Merchant @relation(fields: [merchantId], references: [id])
+}
+
+// ─────────────────────────────────────────────────────────────────
+// SETTLEMENT
+// End-of-day sweep records.
+// ─────────────────────────────────────────────────────────────────
+model Settlement {
+  id         String   @id @default(uuid())
+  amount     Float
+  status     String   @default("COMPLETED")
+  reference  String   @unique
+  createdAt  DateTime @default(now())
+
+  merchantId String
+  merchant   Merchant @relation(fields: [merchantId], references: [id])
+}
+
+// ─────────────────────────────────────────────────────────────────
+// WEBHOOK EVENT LOG
+// Every raw Nomba webhook stored before processing.
+// Allows replay and audit.
+// ─────────────────────────────────────────────────────────────────
+model WebhookEvent {
+  id          String   @id @default(uuid())
+  requestId   String   @unique  // Nomba's requestId — deduplication key
+  event       String            // e.g. virtual_account.funded
+  payload     String            // raw JSON string
+  signature   String
+  processed   Boolean  @default(false)
+  processedAt DateTime?
+  error       String?           // error message if processing failed
+  createdAt   DateTime @default(now())
+}

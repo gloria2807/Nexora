@@ -1,4 +1,4 @@
-export default function Table({ columns, data, rowKey = "id" }) {
+export default function Table({ columns = [], data = [], rowKey = "id" }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
@@ -14,6 +14,7 @@ export default function Table({ columns, data, rowKey = "id" }) {
             ))}
           </tr>
         </thead>
+
         <tbody>
           {data.map((row) => (
             <tr
@@ -25,7 +26,9 @@ export default function Table({ columns, data, rowKey = "id" }) {
                   key={col.key}
                   className="py-3.5 pr-6 last:pr-0 text-sm text-text"
                 >
-                  {col.render ? col.render(row[col.key], row) : row[col.key]}
+                  {col.render
+                    ? col.render(row[col.key], row)
+                    : row[col.key]}
                 </td>
               ))}
             </tr>
@@ -33,5 +36,5 @@ export default function Table({ columns, data, rowKey = "id" }) {
         </tbody>
       </table>
     </div>
-  )
+  );
 }

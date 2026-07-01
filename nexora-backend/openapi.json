@@ -1,0 +1,327 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Nexora API",
+    "version": "1.0.0",
+    "description": "Dedicated Virtual Account & Reconciliation Engine — Powered by Nomba. Provision customer-named NUBANs, reconcile inbound transfers automatically, and expose clean APIs for downstream integrations.",
+    "contact": {
+      "name": "Nexora Developer Support",
+      "email": "dev@nexora.ng"
+    }
+  },
+  "servers": [
+    { "url": "http://localhost:3000", "description": "Local development" },
+    { "url": "https://api.nexora.ng", "description": "Production" }
+  ],
+  "security": [{ "BearerAuth": [] }],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Your Nexora API key from Settings → API Credentials"
+      }
+    },
+    "schemas": {
+      "VirtualAccount": {
+        "type": "object",
+        "properties": {
+          "accountRef": { "type": "string", "example": "nexora_a1b2c3d4_1719850000000" },
+          "accountName": { "type": "string", "example": "ACME CORP COLLECTIONS" },
+          "accountNumber": { "type": "string", "example": "9391076543" },
+          "bankName": { "type": "string", "example": "Nombank MFB" },
+          "status": { "type": "string", "enum": ["ACTIVE", "FROZEN", "CLOSED"] },
+          "currentBalance": { "type": "number", "example": 250000 },
+          "customerId": { "type": "string", "format": "uuid" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "LedgerEntry": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "type": { "type": "string", "enum": ["CREDIT", "DEBIT"] },
+          "amount": { "type": "number", "example": 50000 },
+          "balanceAfter": { "type": "number", "example": 300000 },
+          "description": { "type": "string", "example": "Transfer from Emeka Nwosu — Invoice INV-001" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Exception": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "type": { "type": "string", "enum": ["UNMATCHED", "OVERPAYMENT", "UNDERPAYMENT", "MISDIRECTED"] },
+          "reason": { "type": "string" },
+          "amount": { "type": "number" },
+          "senderName": { "type": "string" },
+          "resolved": { "type": "boolean" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ReconciliationReport": {
+        "type": "object",
+        "properties": {
+          "collectionEfficiency": { "type": "number", "example": 92.4, "description": "Percentage of transactions auto-matched" },
+          "totalProcessed": { "type": "integer", "example": 1284 },
+          "reconciledCount": { "type": "integer", "example": 1186 },
+          "unreconciledCount": { "type": "integer", "example": 98 },
+          "totalAmount": { "type": "number", "example": 84500000 },
+          "reconciledAmount": { "type": "number", "example": 78000000 },
+          "unreconciledAmount": { "type": "number", "example": 6500000 }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" },
+          "code": { "type": "string" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/public/v1/virtual-accounts": {
+      "post": {
+        "summary": "Provision a virtual account",
+        "description": "Creates a permanent customer-named NUBAN via Nomba. Each customer gets one dedicated account number tied to their identity across all transactions. Pass BVN to upgrade KYC tier to 2. Use `x-idempotency-key` header to safely retry without double-provisioning.",
+        "tags": ["Virtual Accounts"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["accountName", "email", "phone"],
+                "properties": {
+                  "accountName": { "type": "string", "example": "ACME CORP COLLECTIONS", "minLength": 8 },
+                  "email": { "type": "string", "format": "email" },
+                  "phone": { "type": "string", "example": "08012345678" },
+                  "bvn": { "type": "string", "description": "Optional. Upgrades KYC to Tier 2." }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-idempotency-key",
+            "schema": { "type": "string" },
+            "description": "UUID v4. Reuse on retry — will return the same account without re-provisioning."
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Virtual account provisioned",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/VirtualAccount" } }
+            }
+          },
+          "400": { "description": "Missing required fields", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "502": { "description": "Nomba provisioning failed" }
+        }
+      },
+      "get": {
+        "summary": "List all virtual accounts",
+        "description": "Returns all provisioned accounts. Filter by `customerId` or `status`.",
+        "tags": ["Virtual Accounts"],
+        "parameters": [
+          { "in": "query", "name": "customerId", "schema": { "type": "string" } },
+          { "in": "query", "name": "status", "schema": { "type": "string", "enum": ["ACTIVE", "FROZEN", "CLOSED"] } }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of accounts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accounts": { "type": "array", "items": { "$ref": "#/components/schemas/VirtualAccount" } },
+                    "total": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/public/v1/virtual-accounts/{accountRef}": {
+      "get": {
+        "summary": "Fetch a virtual account",
+        "description": "Returns current balance, status, and linked customer. Use this to display the account card to your customer.",
+        "tags": ["Virtual Accounts"],
+        "parameters": [{ "in": "path", "name": "accountRef", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Account details", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VirtualAccount" } } } },
+          "404": { "description": "Account not found" }
+        }
+      },
+      "patch": {
+        "summary": "Update a virtual account",
+        "description": "Rename the account or change its status. **Edge cases**: Cannot reactivate a CLOSED account. FROZEN accounts still receive transfers (caught as exceptions). KYC tier changes propagate automatically when BVN is added.",
+        "tags": ["Virtual Accounts"],
+        "parameters": [{ "in": "path", "name": "accountRef", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "accountName": { "type": "string" },
+                  "status": { "type": "string", "enum": ["ACTIVE", "FROZEN"] }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Updated account" }, "409": { "description": "Cannot reactivate a closed account" } }
+      },
+      "delete": {
+        "summary": "Close a virtual account",
+        "description": "Calls Nomba to expire the NUBAN, then marks the account CLOSED locally. **Edge case**: Blocked if balance > 0 unless `?force=true` is passed. Funds on closed accounts still route to the catch-all exception queue.",
+        "tags": ["Virtual Accounts"],
+        "parameters": [
+          { "in": "path", "name": "accountRef", "required": true, "schema": { "type": "string" } },
+          { "in": "query", "name": "force", "schema": { "type": "boolean" }, "description": "Close even if balance > 0" }
+        ],
+        "responses": {
+          "200": { "description": "Account closed" },
+          "409": { "description": "Account has a non-zero balance" }
+        }
+      }
+    },
+    "/api/public/v1/statements/{accountRef}": {
+      "get": {
+        "summary": "Get account statement",
+        "description": "Returns every ledger entry (credit/debit) with running balance for a virtual account. Supports date range filtering via `from` and `to` query params (ISO 8601).",
+        "tags": ["Statements"],
+        "parameters": [
+          { "in": "path", "name": "accountRef", "required": true, "schema": { "type": "string" } },
+          { "in": "query", "name": "from", "schema": { "type": "string", "format": "date" } },
+          { "in": "query", "name": "to", "schema": { "type": "string", "format": "date" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Statement entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accountRef": { "type": "string" },
+                    "accountName": { "type": "string" },
+                    "currentBalance": { "type": "number" },
+                    "entries": { "type": "array", "items": { "$ref": "#/components/schemas/LedgerEntry" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/public/v1/reconciliation/report": {
+      "get": {
+        "summary": "Reconciliation metrics",
+        "description": "Returns collection efficiency percentage, matched vs unmatched counts, and total naira volumes. Refresh nightly for ops dashboards.",
+        "tags": ["Reconciliation"],
+        "responses": {
+          "200": { "description": "Report", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReconciliationReport" } } } }
+        }
+      }
+    },
+    "/api/public/v1/exceptions": {
+      "get": {
+        "summary": "List payment exceptions",
+        "description": "Returns all unmatched, overpaid, misdirected, or underpaid transactions. Filter by `resolved=true|false`.",
+        "tags": ["Reconciliation"],
+        "parameters": [
+          { "in": "query", "name": "resolved", "schema": { "type": "boolean" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exceptions list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "exceptions": { "type": "array", "items": { "$ref": "#/components/schemas/Exception" } },
+                    "total": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/public/v1/exceptions/{id}/resolve": {
+      "post": {
+        "summary": "Resolve an exception",
+        "description": "Manually marks a payment exception as resolved. Updates the underlying transaction status to RECONCILED. Idempotent — returns 409 if already resolved.",
+        "tags": ["Reconciliation"],
+        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Resolved successfully" },
+          "404": { "description": "Exception not found" },
+          "409": { "description": "Already resolved" }
+        }
+      }
+    },
+    "/api/public/v1/transfers": {
+      "post": {
+        "summary": "Initiate an outbound transfer",
+        "description": "Performs bank account lookup first (never skipped), then initiates the transfer from your merchant balance. Use `x-idempotency-key` to safely retry. Amounts are in Naira.",
+        "tags": ["Transfers"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["amount", "destinationAccount", "bankCode"],
+                "properties": {
+                  "amount": { "type": "number", "example": 50000, "description": "In Naira" },
+                  "destinationAccount": { "type": "string", "example": "0123456789" },
+                  "bankCode": { "type": "string", "example": "044" },
+                  "narration": { "type": "string", "example": "Invoice payment — INV-001" }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-idempotency-key",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "UUID v4. Required. Prevents duplicate transfers on retry."
+          }
+        ],
+        "responses": {
+          "200": { "description": "Transfer initiated" },
+          "422": { "description": "Account lookup failed — invalid account number or bank code" }
+        }
+      }
+    },
+    "/webhooks/nomba": {
+      "post": {
+        "summary": "Nomba webhook receiver",
+        "description": "Receives Nomba event notifications. Verifies HMAC-SHA256 signature using your webhook secret, deduplicates by `requestId`, and triggers the reconciliation engine. Always ACKs 200 immediately before processing. Supported events: `virtual_account.funded`, `transfer.success`, `transfer.failed`.",
+        "tags": ["Webhooks"],
+        "parameters": [
+          { "in": "header", "name": "x-nomba-signature", "required": true, "schema": { "type": "string" }, "description": "HMAC-SHA256 hex digest of the raw request body" }
+        ],
+        "responses": {
+          "200": { "description": "Acknowledged" },
+          "401": { "description": "Invalid or missing signature" }
+        }
+      }
+    }
+  }
+}
