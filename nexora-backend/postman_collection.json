@@ -1,0 +1,357 @@
+{
+  "info": {
+    "name": "Nexora API — Nomba Hackathon 2026",
+    "description": "Complete Postman collection for the Nexora Virtual Account & Reconciliation Engine.\n\n## Setup\n1. Import this collection\n2. Set the `baseUrl` variable to `http://localhost:3000`\n3. Run `POST /api/seed` first to populate demo data\n4. Copy the `apiKey` from `GET /api/me` and set the `apiKey` collection variable\n5. Use the numbered requests in order to see the full flow",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "apiKey", "value": "paste_your_api_key_here" }
+  ],
+  "item": [
+    {
+      "name": "0. Health & Setup",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/health"
+          }
+        },
+        {
+          "name": "Seed Demo Data",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/seed"
+          }
+        },
+        {
+          "name": "Get Merchant Profile (copy apiKey)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/me"
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. Customers",
+      "item": [
+        {
+          "name": "List Customers",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/customers" }
+        },
+        {
+          "name": "Create Customer (Tier 1)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/customers",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Tunde\",\n  \"lastName\": \"Bakare\",\n  \"email\": \"tunde@example.ng\",\n  \"phone\": \"08011111111\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Create Customer (Tier 2 — with BVN)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/customers",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Ngozi\",\n  \"lastName\": \"Obi\",\n  \"email\": \"ngozi@example.ng\",\n  \"phone\": \"08022222222\",\n  \"bvn\": \"12345678901\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Duplicate Email (expect 409)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/customers",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Adaeze\",\n  \"lastName\": \"Okafor\",\n  \"email\": \"adaeze@acmecorp.ng\",\n  \"phone\": \"08099999999\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Virtual Accounts",
+      "item": [
+        {
+          "name": "List Virtual Accounts",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/accounts" }
+        },
+        {
+          "name": "Create Virtual Account (no customer)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/accounts",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountName\": \"STANDALONE COLLECTIONS ACCOUNT\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Create Virtual Account (linked to customer)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/accounts",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountName\": \"TUNDE BAKARE PAYMENTS\",\n  \"customerId\": \"paste_customer_id_here\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Edge Case — Duplicate account for same customer (expect 409)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/accounts",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountName\": \"SECOND ACCOUNT FOR SAME CUSTOMER\",\n  \"customerId\": \"paste_same_customer_id_here\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Edge Case — Short name (expect 400)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/accounts",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"accountName\": \"TND\"\n}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Invoices",
+      "item": [
+        {
+          "name": "List Invoices",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/invoices" }
+        },
+        {
+          "name": "Create Invoice",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/invoices",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": \"paste_customer_id_here\",\n  \"amount\": 75000,\n  \"dueDate\": \"2026-08-01\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Simulate & Reconcile",
+      "item": [
+        {
+          "name": "Simulate — Exact match (invoice fully paid)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/simulate",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountReference\": \"paste_account_ref_here\",\n  \"amount\": 75000\n}"
+            }
+          }
+        },
+        {
+          "name": "Simulate — Partial payment",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/simulate",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountReference\": \"paste_account_ref_here\",\n  \"amount\": 30000\n}"
+            }
+          }
+        },
+        {
+          "name": "Simulate — Overpayment (triggers exception)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/simulate",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountReference\": \"paste_account_ref_here\",\n  \"amount\": 150000\n}"
+            }
+          }
+        },
+        {
+          "name": "Simulate — No open invoice (UNMATCHED exception)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/simulate",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountReference\": \"paste_account_ref_here\",\n  \"amount\": 50000\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Transactions & Reconciliation",
+      "item": [
+        {
+          "name": "List All Transactions",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/transactions" }
+        },
+        {
+          "name": "Get Exceptions",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/exceptions" }
+        },
+        {
+          "name": "Resolve Exception",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/exceptions/paste_exception_id_here/resolve"
+          }
+        },
+        {
+          "name": "Reconciliation Report",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/reconciliation/report" }
+        }
+      ]
+    },
+    {
+      "name": "6. Statements",
+      "item": [
+        {
+          "name": "Get Account Statement",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/statements/paste_account_id_here" }
+        }
+      ]
+    },
+    {
+      "name": "7. Merchant Hub",
+      "item": [
+        {
+          "name": "Merchant Balance",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/merchant/balance" }
+        },
+        {
+          "name": "Pay Airtime",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/services/pay",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"type\": \"AIRTIME\",\n  \"destination\": \"08012345678\",\n  \"amount\": 1000\n}" }
+          }
+        },
+        {
+          "name": "Large Transfer (triggers approval queue)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/services/pay",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"type\": \"BANK TRANSFER\",\n  \"destination\": \"044:0123456789\",\n  \"amount\": 750000\n}" }
+          }
+        },
+        {
+          "name": "Get Pending Approvals",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/services/approvals" }
+        },
+        {
+          "name": "Approve Service",
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/services/paste_service_id_here/approve" }
+        },
+        {
+          "name": "Reject Service",
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/services/paste_service_id_here/reject" }
+        },
+        {
+          "name": "Settlement History",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/merchant/settlements" }
+        }
+      ]
+    },
+    {
+      "name": "8. Public Developer API",
+      "item": [
+        {
+          "name": "Provision Virtual Account (Public API)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/public/v1/virtual-accounts",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-idempotency-key", "value": "idem_test_001" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountName\": \"NEXORA SDK TEST ACCOUNT\",\n  \"email\": \"sdk@example.ng\",\n  \"phone\": \"08033333333\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Idempotent retry (same key — expect same account)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/public/v1/virtual-accounts",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-idempotency-key", "value": "idem_test_001" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountName\": \"NEXORA SDK TEST ACCOUNT\",\n  \"email\": \"sdk@example.ng\",\n  \"phone\": \"08033333333\"\n}"
+            }
+          }
+        },
+        {
+          "name": "List Accounts (Public API)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/public/v1/virtual-accounts",
+            "header": [{ "key": "Authorization", "value": "Bearer {{apiKey}}" }]
+          }
+        },
+        {
+          "name": "Get Statement (Public API)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/public/v1/statements/paste_account_ref_here",
+            "header": [{ "key": "Authorization", "value": "Bearer {{apiKey}}" }]
+          }
+        },
+        {
+          "name": "Reconciliation Report (Public API)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/public/v1/reconciliation/report",
+            "header": [{ "key": "Authorization", "value": "Bearer {{apiKey}}" }]
+          }
+        },
+        {
+          "name": "Unauthorised request (expect 401)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/public/v1/virtual-accounts",
+            "header": [{ "key": "Authorization", "value": "Bearer bad_key_here" }]
+          }
+        }
+      ]
+    }
+  ]
+}
