@@ -4,6 +4,9 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
 import webhookRouter from './routes/webhook.js';
 import customersRouter from './routes/customers.js';
@@ -13,34 +16,41 @@ import invoicesRouter from './routes/invoices.js';
 import merchantRouter from './routes/merchant.js';
 import metaRouter from './routes/meta.js';
 import publicApiRouter from './routes/publicApi.js';
+import { runSeed } from './lib/seed.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ── CORS ──────────────────────────────────────────────────────────
+// On Render, FRONTEND_URL should be your deployed frontend URL.
+// Locally it's http://localhost:5173.
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:3001',
+  'https://nexora-recon.vercel.app',
+].filter(Boolean);
+
 app.use(cors({
-  origin: [
-    process.env.FRONTEND_URL || 'http://localhost:5173',
-    'http://localhost:5174',
-    'http://localhost:3001',
-  ],
+  origin: (origin, callback) => {
+    // Allow requests with no origin (Postman, curl, health checks)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error(`CORS blocked: ${origin}`));
+  },
   credentials: true,
 }));
 
 // ── Webhook BEFORE express.json() ─────────────────────────────────
-// Needs raw Buffer for HMAC verification (express.raw applied in the route)
+// express.raw() is applied inside the webhook route itself.
 app.use(webhookRouter);
 
 // ── JSON body parser ──────────────────────────────────────────────
 app.use(express.json());
 
-// ── Static downloads for Developers page ─────────────────────────
-// Frontend fetches /openapi.json and /postman_collection.json directly
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
+// ── Static file downloads ─────────────────────────────────────────
 app.get('/openapi.json', (req, res) => {
   try {
     const spec = readFileSync(join(__dirname, '../openapi.json'), 'utf8');
@@ -69,44 +79,18 @@ app.get('/health', (req, res) => {
     service: 'nexora-backend',
     timestamp: new Date().toISOString(),
     env: process.env.NODE_ENV,
+    db: process.env.DATABASE_PROVIDER || 'sqlite',
   });
 });
 
-// ── Internal dashboard API ────────────────────────────────────────
-
-// Customers
+// ── Routes ────────────────────────────────────────────────────────
 app.use('/api/customers', customersRouter);
-
-// Accounts (virtual account provisioning)
 app.use('/api/accounts', accountsRouter);
-
-// Transactions:  GET /api/transactions
-//                POST /api/simulate
-//                GET /api/exceptions
-//                POST /api/exceptions/:id/resolve
-//                GET /api/reconciliation/report
-//                GET /api/statements/:accountId
 app.use('/api', transactionsRouter);
-
-// Invoices
 app.use('/api/invoices', invoicesRouter);
-
-// Merchant:  GET  /api/merchant/balance
-//            GET  /api/merchant/settlements
-//            GET  /api/services             (services list)
-//            GET  /api/services/approvals
-//            POST /api/services/pay
-//            POST /api/services/:id/approve
-//            POST /api/services/:id/reject
 app.use('/api/merchant', merchantRouter);
 app.use('/api/services', merchantRouter);
-
-// Meta:  GET /api/me
-//        GET /api/docs
-//        POST /api/seed
 app.use('/api', metaRouter);
-
-// ── Public Developer API ───────────────────────────────────────────
 app.use('/api/public/v1', publicApiRouter);
 
 // ── 404 ───────────────────────────────────────────────────────────
@@ -120,12 +104,27 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error', detail: err.message });
 });
 
-app.listen(PORT, () => {
-  console.log(`\n🚀 Nexora backend running on http://localhost:${PORT}`);
-  console.log(`   Health:     http://localhost:${PORT}/health`);
-  console.log(`   Webhooks:   http://localhost:${PORT}/webhooks/nomba`);
-  console.log(`   Public API: http://localhost:${PORT}/api/public/v1`);
-  console.log(`   Environment: ${process.env.NODE_ENV || 'development'}\n`);
+// ── Start server ──────────────────────────────────────────────────
+app.listen(PORT, async () => {
+  console.log(`\n🚀 Nexora backend running on port ${PORT}`);
+  console.log(`   Health:     /health`);
+  console.log(`   Webhooks:   /webhooks/nomba`);
+  console.log(`   Public API: /api/public/v1`);
+  console.log(`   Database:   ${process.env.DATABASE_PROVIDER || 'sqlite'}`);
+  console.log(`   Env:        ${process.env.NODE_ENV || 'development'}\n`);
+
+  // ── Auto-seed on first boot ──────────────────────────────────────
+  // Set AUTO_SEED=true in Render environment variables.
+  // The seed function is idempotent — safe even if called multiple times.
+  if (process.env.AUTO_SEED === 'true') {
+    console.log('[boot] AUTO_SEED=true — running seed...');
+    try {
+      await runSeed();
+      console.log('[boot] Seed completed successfully.');
+    } catch (err) {
+      console.error('[boot] Seed failed (non-fatal):', err.message);
+    }
+  }
 });
 
 export default app;
