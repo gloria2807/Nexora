@@ -1,21 +1,29 @@
 // Nexora — Prisma Schema
-// Supports both SQLite (local dev) and PostgreSQL (Render/production).
-// Switch is controlled entirely by DATABASE_URL in your environment:
-//   Local:  DATABASE_URL="file:./dev.db"
-//   Render: DATABASE_URL="postgresql://..." (from Render's DB panel)
+// Provider is hardcoded to "postgresql" for Render deployment.
+// For local development with SQLite, see the LOCAL DEVELOPMENT note below.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = env("DATABASE_PROVIDER")
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
 // ─────────────────────────────────────────────────────────────────
-// MERCHANT
+// LOCAL DEVELOPMENT NOTE:
+// For local SQLite, you have two options:
+//
+// Option A (recommended) — use a local PostgreSQL via Docker:
+//   docker run --name nexora-pg -e POSTGRES_PASSWORD=nexora -e POSTGRES_DB=nexora -p 5432:5432 -d postgres
+//   DATABASE_URL="postgresql://postgres:nexora@localhost:5432/nexora"
+//
+// Option B — temporarily swap provider back to "sqlite" locally:
+//   Change provider to "sqlite" and DATABASE_URL to "file:./dev.db"
+//   Do NOT commit this change.
 // ─────────────────────────────────────────────────────────────────
+
 model Merchant {
   id               String   @id @default(uuid())
   name             String
@@ -30,9 +38,6 @@ model Merchant {
   services         MerchantService[]
 }
 
-// ─────────────────────────────────────────────────────────────────
-// CUSTOMER
-// ─────────────────────────────────────────────────────────────────
 model Customer {
   id          String   @id @default(uuid())
   firstName   String
@@ -48,9 +53,6 @@ model Customer {
   invoices        Invoice[]
 }
 
-// ─────────────────────────────────────────────────────────────────
-// VIRTUAL ACCOUNT
-// ─────────────────────────────────────────────────────────────────
 model VirtualAccount {
   id                   String   @id @default(uuid())
   accountName          String
@@ -74,9 +76,6 @@ model VirtualAccount {
   ledgerEntries LedgerEntry[]
 }
 
-// ─────────────────────────────────────────────────────────────────
-// INVOICE
-// ─────────────────────────────────────────────────────────────────
 model Invoice {
   id          String   @id @default(uuid())
   reference   String   @unique
@@ -93,22 +92,19 @@ model Invoice {
   transactions Transaction[]
 }
 
-// ─────────────────────────────────────────────────────────────────
-// TRANSACTION
-// ─────────────────────────────────────────────────────────────────
 model Transaction {
-  id               String   @id @default(uuid())
-  reference        String   @unique
-  nombaRequestId   String?  @unique
+  id               String    @id @default(uuid())
+  reference        String    @unique
+  nombaRequestId   String?   @unique
   nombaSessionId   String?
   amount           Float
   senderName       String?
   senderAccount    String?
   narration        String?
-  status           String   @default("PENDING")
+  status           String    @default("PENDING")
   reconciledAt     DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   virtualAccountId String
   virtualAccount   VirtualAccount @relation(fields: [virtualAccountId], references: [id])
@@ -120,27 +116,21 @@ model Transaction {
   ledgerEntries    LedgerEntry[]
 }
 
-// ─────────────────────────────────────────────────────────────────
-// EXCEPTION
-// ─────────────────────────────────────────────────────────────────
 model Exception {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   type          String
   reason        String
   amount        Float
   senderName    String?
-  resolved      Boolean  @default(false)
+  resolved      Boolean   @default(false)
   resolvedAt    DateTime?
   resolvedBy    String?
-  createdAt     DateTime @default(now())
+  createdAt     DateTime  @default(now())
 
-  transactionId String   @unique
+  transactionId String    @unique
   transaction   Transaction @relation(fields: [transactionId], references: [id])
 }
 
-// ─────────────────────────────────────────────────────────────────
-// LEDGER ENTRY
-// ─────────────────────────────────────────────────────────────────
 model LedgerEntry {
   id               String   @id @default(uuid())
   type             String
@@ -156,9 +146,6 @@ model LedgerEntry {
   transaction      Transaction? @relation(fields: [transactionId], references: [id])
 }
 
-// ─────────────────────────────────────────────────────────────────
-// MERCHANT SERVICE
-// ─────────────────────────────────────────────────────────────────
 model MerchantService {
   id          String   @id @default(uuid())
   type        String
@@ -174,9 +161,6 @@ model MerchantService {
   merchant    Merchant @relation(fields: [merchantId], references: [id])
 }
 
-// ─────────────────────────────────────────────────────────────────
-// SETTLEMENT
-// ─────────────────────────────────────────────────────────────────
 model Settlement {
   id         String   @id @default(uuid())
   amount     Float
@@ -188,17 +172,14 @@ model Settlement {
   merchant   Merchant @relation(fields: [merchantId], references: [id])
 }
 
-// ─────────────────────────────────────────────────────────────────
-// WEBHOOK EVENT LOG
-// ─────────────────────────────────────────────────────────────────
 model WebhookEvent {
-  id          String   @id @default(uuid())
-  requestId   String   @unique
+  id          String    @id @default(uuid())
+  requestId   String    @unique
   event       String
   payload     String
   signature   String
-  processed   Boolean  @default(false)
+  processed   Boolean   @default(false)
   processedAt DateTime?
   error       String?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
 }
